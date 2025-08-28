@@ -1,0 +1,97 @@
+name: Build and Upload iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'sing-box version to build (default: latest)'
+        required: false
+        default: 'latest'
+        type: string
+  push:
+    branches:
+
+jobs:
+  build-ios-app:
+    runs-on: macos-latest
+    env:
+      XCODEPROJ_NAME: sing-box
+      APPLICATION_NAME: sing-box
+      SCHEME_NAME: SFI
+      XCODE_VERSION: "26.3"
+      GO_VERSION: "1.25.9"
+      NODE_VERSION: "24"
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Install ldid
+        run: |
+          brew install ldid
+
+      - name: Select Xcode version
+        run: |
+          sudo xcode-select -switch /Applications/Xcode_${{ env.XCODE_VERSION }}.app
+          # xcodebuild -downloadPlatform iOS
+
+      - name: Get sing-box version
+        id: get_version
+        run: |
+          set -Eeuox pipefail
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ] || [ "$VERSION" == "latest" ]; then
+            VERSION=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Cache Libbox.xcframework
+        id: cache-libbox
+        uses: actions/cache@v5
+        with:
+          path: Libbox.xcframework
+          key: libbox-${{ steps.get_version.outputs.version }}-xcode${{ env.XCODE_VERSION }}-go${{ env.GO_VERSION }}-node${{ env.NODE_VERSION }}-macOS-latest
+
+      - name: Setup Go
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Node
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build Libbox.xcframework
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuox pipefail
+
+          BUILD_DIR=$(mktemp -d)
+          cd $BUILD_DIR
+          git clone --branch ${{ steps.get_version.outputs.version }} --depth 1 https://github.com/SagerNet/sing-box box
+          cd box
+          make lib_install
+          gomobile init
+          go run ./cmd/internal/build_libbox -target apple -platform ios,tvos,macos
+          cp -R Libbox.xcframework $GITHUB_WORKSPACE/
+          cd $GITHUB_WORKSPACE
+          rm -rf $BUILD_DIR
+
+      - name: Make build script executable
+        run: chmod +x ./make_ios.sh
+
+      - name: Run iOS build script
+        run: ./make_ios.sh
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sing-box-ipa
+          path: packages/sing-box.ipa
+          archive: false
+          if-no-files-found: error
