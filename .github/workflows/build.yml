@@ -43,7 +43,11 @@ jobs:
           set -Eeuox pipefail
           VERSION="${{ github.event.inputs.version }}"
           if [ -z "$VERSION" ] || [ "$VERSION" == "latest" ]; then
-            VERSION=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r .tag_name)
+            VERSION=$(curl -s --header "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r '.tag_name')
+          fi
+          if [ "$VERSION" == "null" ]; then
+            echo "Failed to get the latest version. Please specify a version."
+            exit 1
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
@@ -82,11 +86,33 @@ jobs:
           cd $GITHUB_WORKSPACE
           rm -rf $BUILD_DIR
 
-      - name: Make build script executable
-        run: chmod +x ./make_ios.sh
+      - name: Cache Xcode build
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: xcode-deriveddata-${{ runner.os }}-${{ hashFiles('**/*.swift', '**/*.pbxproj') }}
+          restore-keys: |
+            xcode-deriveddata-${{ runner.os }}-
 
-      - name: Run iOS build script
-        run: ./make_ios.sh
+      - name: iOS build
+        run: |
+          set -Eeuox pipefail
+
+          XCODEPROJ_NAME=sing-box
+          APPLICATION_NAME=sing-box
+          SCHEME_NAME=SFI
+
+          xcodebuild -project $XCODEPROJ_NAME.xcodeproj -scheme $SCHEME_NAME -destination generic/platform=iOS -configuration Debug -sdk iphoneos build install STRIP_INSTALLED_PRODUCT=NO ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO ENABLE_BITCODE=NO DSTROOT=packages/
+
+          ldid -SSFI/SFI.entitlements packages/Applications/$APPLICATION_NAME.app/$APPLICATION_NAME
+          ldid -SExtension/Extension.entitlements packages/Applications/$APPLICATION_NAME.app/PlugIns/Extension.appex/Extension
+          ldid -SIntentsExtension/IntentsExtension.entitlements packages/Applications/$APPLICATION_NAME.app/Extensions/IntentsExtension.appex/IntentsExtension
+
+          mkdir -p packages/Payload
+          cp -rp packages/Applications/$APPLICATION_NAME.app packages/Payload
+          cd packages
+          zip -qr $APPLICATION_NAME.ipa Payload
+          rm -r Payload
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v7
