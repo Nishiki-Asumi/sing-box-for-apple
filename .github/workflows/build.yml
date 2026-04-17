@@ -20,7 +20,6 @@ jobs:
       SCHEME_NAME: SFI
       XCODE_VERSION: "26.3"
       GO_VERSION: "1.25.9"
-      NODE_VERSION: "24"
       
     steps:
       - name: Checkout repository
@@ -56,19 +55,12 @@ jobs:
         uses: actions/cache@v5
         with:
           path: Libbox.xcframework
-          key: libbox-${{ steps.get_version.outputs.version }}-xcode${{ env.XCODE_VERSION }}-go${{ env.GO_VERSION }}-node${{ env.NODE_VERSION }}-macOS-latest
-
+          key: libbox-${{ steps.get_version.outputs.version }}-go${{ env.GO_VERSION }}
       - name: Setup Go
         if: steps.cache-libbox.outputs.cache-hit != 'true'
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Setup Node
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
 
       - name: Build Libbox.xcframework
         if: steps.cache-libbox.outputs.cache-hit != 'true'
@@ -81,7 +73,7 @@ jobs:
           cd box
           make lib_install
           gomobile init
-          go run ./cmd/internal/build_libbox -target apple -platform ios,tvos,macos
+          go run ./cmd/internal/build_libbox -target apple -platform ios,iossimulator
           cp -R Libbox.xcframework $GITHUB_WORKSPACE/
           cd $GITHUB_WORKSPACE
           rm -rf $BUILD_DIR
@@ -102,7 +94,7 @@ jobs:
           APPLICATION_NAME=sing-box
           SCHEME_NAME=SFI
 
-          xcodebuild -project $XCODEPROJ_NAME.xcodeproj -scheme $SCHEME_NAME -destination generic/platform=iOS -configuration Debug -sdk iphoneos build install STRIP_INSTALLED_PRODUCT=NO ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO ENABLE_BITCODE=NO DSTROOT=packages/
+          xcodebuild -project $XCODEPROJ_NAME.xcodeproj -scheme $SCHEME_NAME -destination generic/platform=iOS -configuration Release -sdk iphoneos build install STRIP_INSTALLED_PRODUCT=NO ARCHS=arm64 CODE_SIGNING_ALLOWED=NO ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO ENABLE_BITCODE=NO DSTROOT=packages/
 
           ldid -SSFI/SFI.entitlements packages/Applications/$APPLICATION_NAME.app/$APPLICATION_NAME
           ldid -SExtension/Extension.entitlements packages/Applications/$APPLICATION_NAME.app/PlugIns/Extension.appex/Extension
